@@ -19,10 +19,13 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -48,12 +51,25 @@ class MainActivity : ComponentActivity() {
 
     private var healthConnectClient: HealthConnectClient? = null
 
+    private val healthPermissions = setOf(
+        HealthPermission.getWritePermission(StepsRecord::class),
+        HealthPermission.getReadPermission(StepsRecord::class)
+    )
+
+    private val rawPermissionStrings: Set<String> by lazy {
+        healthPermissions.map { it.permission }.toSet()
+    }
+
     private var onPermissionResult: ((String) -> Unit)? = null
 
     private val requestPermissionLauncher = registerForActivityResult(
         PermissionController.createRequestPermissionResultContract()
     ) { granted: Set<String> ->
-        onPermissionResult?.invoke("Granted permissions: $granted")
+        val allGranted = granted.containsAll(rawPermissionStrings)
+        onPermissionResult?.invoke(
+            if (allGranted) "All permissions granted: $granted"
+            else "Partial permissions — granted: $granted"
+        )
     }
 
     private val openSettingsLauncher = registerForActivityResult(
@@ -79,6 +95,7 @@ class MainActivity : ComponentActivity() {
     @Composable
     private fun HealthFakeApp() {
         var logText by remember { mutableStateOf("") }
+        var customStepInput by remember { mutableStateOf("") }
 
         fun appendLog(msg: String) {
             logText = logText + msg + "\n"
@@ -161,6 +178,44 @@ class MainActivity : ComponentActivity() {
                 }
 
                 Spacer(Modifier.height(8.dp))
+
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    OutlinedTextField(
+                        value = customStepInput,
+                        onValueChange = { input ->
+                            if (input.all { it.isDigit() } && input.length <= 9) {
+                                customStepInput = input
+                            }
+                        },
+                        label = { Text("Custom steps") },
+                        placeholder = { Text("e.g. 7500") },
+                        singleLine = true,
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                        modifier = Modifier.weight(1f)
+                    )
+
+                    Button(
+                        onClick = {
+                            val count = customStepInput.toLongOrNull()
+                            if (count != null && count > 0) {
+                                injectSteps(count, onResult = { appendLog(it) })
+                            } else {
+                                appendLog("ERROR: Enter a valid positive number")
+                            }
+                        },
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = Color(0xFFFF5722)
+                        )
+                    ) {
+                        Text("Inject")
+                    }
+                }
+
+                Spacer(Modifier.height(12.dp))
 
                 Button(
                     onClick = { openSettings(onResult = { appendLog(it) }) },

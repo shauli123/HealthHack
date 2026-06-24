@@ -26,6 +26,7 @@
 
             <intent-filter>
                 <action android:name="android.intent.action.SHOW_HEALTH_CONNECT_PRIVACY_POLICY" />
+                <category android:name="android.intent.category.DEFAULT" />
             </intent-filter>
 
         </activity>
