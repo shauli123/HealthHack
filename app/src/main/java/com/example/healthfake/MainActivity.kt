@@ -4,6 +4,8 @@ import android.content.Intent
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
+import androidx.activity.result.ActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -34,6 +36,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.health.connect.client.HealthConnectClient
 import androidx.health.connect.client.PermissionController
+import androidx.health.connect.client.permission.HealthPermission
 import androidx.health.connect.client.records.StepsRecord
 import androidx.lifecycle.lifecycleScope
 import kotlinx.coroutines.launch
@@ -44,6 +47,20 @@ import java.time.temporal.ChronoUnit
 class MainActivity : ComponentActivity() {
 
     private var healthConnectClient: HealthConnectClient? = null
+
+    private var onPermissionResult: ((String) -> Unit)? = null
+
+    private val requestPermissionLauncher = registerForActivityResult(
+        PermissionController.createRequestPermissionResultContract()
+    ) { granted: Set<String> ->
+        onPermissionResult?.invoke("Granted permissions: $granted")
+    }
+
+    private val openSettingsLauncher = registerForActivityResult(
+        ActivityResultContracts.StartActivityForResult()
+    ) { _: ActivityResult ->
+        // Settings screen closed, no action needed
+    }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -201,15 +218,13 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun requestPermissions(onResult: (String) -> Unit) {
+        onPermissionResult = onResult
         try {
-            val contract = PermissionController.createRequestPermissionResultContract()
             val permissions = setOf(
-                "android.permission.health.WRITE_STEPS",
-                "android.permission.health.READ_STEPS"
+                HealthPermission.getWritePermission(StepsRecord::class),
+                HealthPermission.getReadPermission(StepsRecord::class)
             )
-            val intent = contract.createIntent(this, permissions)
-            startActivity(intent)
-            onResult("Permission request intent launched")
+            requestPermissionLauncher.launch(permissions)
         } catch (e: Exception) {
             onResult("ERROR: ${e.message}\n${e.stackTraceToString()}")
         }
@@ -250,8 +265,7 @@ class MainActivity : ComponentActivity() {
     private fun openSettings(onResult: (String) -> Unit) {
         try {
             val intent = Intent(HealthConnectClient.ACTION_HEALTH_CONNECT_SETTINGS)
-            intent.flags = Intent.FLAG_ACTIVITY_NEW_TASK
-            startActivity(intent)
+            openSettingsLauncher.launch(intent)
             onResult("Opened Health Connect settings")
         } catch (e: Exception) {
             onResult("ERROR: ${e.message}\n${e.stackTraceToString()}")
