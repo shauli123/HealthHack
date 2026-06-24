@@ -39,7 +39,6 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.health.connect.client.HealthConnectClient
 import androidx.health.connect.client.PermissionController
-import androidx.health.connect.client.permission.HealthPermission
 import androidx.health.connect.client.records.StepsRecord
 import androidx.lifecycle.lifecycleScope
 import kotlinx.coroutines.launch
@@ -51,20 +50,17 @@ class MainActivity : ComponentActivity() {
 
     private var healthConnectClient: HealthConnectClient? = null
 
-    private val healthPermissions = setOf(
-        HealthPermission.getWritePermission(StepsRecord::class),
-        HealthPermission.getReadPermission(StepsRecord::class)
+    private val requiredPermissions = setOf(
+        "android.permission.health.WRITE_STEPS",
+        "android.permission.health.READ_STEPS"
     )
-
-    private val rawPermissionStrings: Set<String> =
-        healthPermissions.map { it.permissionString }.toSet()
 
     private var onPermissionResult: ((String) -> Unit)? = null
 
     private val requestPermissionLauncher = registerForActivityResult(
         PermissionController.createRequestPermissionResultContract()
     ) { granted: Set<String> ->
-        val allGranted = granted.containsAll(rawPermissionStrings)
+        val allGranted = granted.containsAll(requiredPermissions)
         onPermissionResult?.invoke(
             if (allGranted) "All permissions granted: $granted"
             else "Partial permissions — granted: $granted"
@@ -274,7 +270,7 @@ class MainActivity : ComponentActivity() {
     private fun requestPermissions(onResult: (String) -> Unit) {
         onPermissionResult = onResult
         try {
-            requestPermissionLauncher.launch(rawPermissionStrings)
+            requestPermissionLauncher.launch(requiredPermissions)
         } catch (e: Exception) {
             onResult("ERROR: ${e.message}\n${e.stackTraceToString()}")
         }
