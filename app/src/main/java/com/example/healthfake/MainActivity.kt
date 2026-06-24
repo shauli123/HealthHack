@@ -56,9 +56,8 @@ class MainActivity : ComponentActivity() {
         HealthPermission.getReadPermission(StepsRecord::class)
     )
 
-    private val rawPermissionStrings: Set<String> by lazy {
-        healthPermissions.map { it.permission }.toSet()
-    }
+    private val rawPermissionStrings: Set<String> =
+        healthPermissions.map { it.permissionString }.toSet()
 
     private var onPermissionResult: ((String) -> Unit)? = null
 
@@ -275,11 +274,7 @@ class MainActivity : ComponentActivity() {
     private fun requestPermissions(onResult: (String) -> Unit) {
         onPermissionResult = onResult
         try {
-            val permissions = setOf(
-                HealthPermission.getWritePermission(StepsRecord::class),
-                HealthPermission.getReadPermission(StepsRecord::class)
-            )
-            requestPermissionLauncher.launch(permissions)
+            requestPermissionLauncher.launch(rawPermissionStrings)
         } catch (e: Exception) {
             onResult("ERROR: ${e.message}\n${e.stackTraceToString()}")
         }
