@@ -34,29 +34,25 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.health.connect.client.HealthConnectClient
 import androidx.health.connect.client.PermissionController
-import androidx.health.connect.client.permission.HealthPermission
 import androidx.health.connect.client.records.StepsRecord
-import androidx.health.connect.client.sdk.SdkStatus
+import androidx.lifecycle.lifecycleScope
+import kotlinx.coroutines.launch
 import java.time.Instant
 import java.time.ZoneId
 import java.time.temporal.ChronoUnit
 
 class MainActivity : ComponentActivity() {
 
-    private lateinit var healthConnectClient: HealthConnectClient
-
-    private val permissionContract =
-        PermissionController.createRequestPermissionResultContract()
-
-    private val permissions = setOf(
-        HealthPermission.WRITE_STEPS,
-        HealthPermission.READ_STEPS
-    )
+    private var healthConnectClient: HealthConnectClient? = null
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
-        healthConnectClient = HealthConnectClient.getOrCreate(this)
+        try {
+            healthConnectClient = HealthConnectClient.getOrCreate(this)
+        } catch (_: Exception) {
+            healthConnectClient = null
+        }
 
         setContent {
             HealthFakeApp()
@@ -100,14 +96,7 @@ class MainActivity : ComponentActivity() {
                     horizontalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
                     Button(
-                        onClick = {
-                            try {
-                                val status = checkHealthConnectStatus()
-                                appendLog("Status: $status")
-                            } catch (e: Exception) {
-                                appendLog("ERROR: ${e.message}\n${e.stackTraceToString()}")
-                            }
-                        },
+                        onClick = { checkStatus(onResult = { appendLog(it) }) },
                         modifier = Modifier.weight(1f),
                         colors = ButtonDefaults.buttonColors(
                             containerColor = MaterialTheme.colorScheme.primary
@@ -117,14 +106,7 @@ class MainActivity : ComponentActivity() {
                     }
 
                     Button(
-                        onClick = {
-                            try {
-                                requestPermissions()
-                                appendLog("Permission request launched")
-                            } catch (e: Exception) {
-                                appendLog("ERROR: ${e.message}\n${e.stackTraceToString()}")
-                            }
-                        },
+                        onClick = { requestPermissions(onResult = { appendLog(it) }) },
                         modifier = Modifier.weight(1f),
                         colors = ButtonDefaults.buttonColors(
                             containerColor = Color(0xFF2196F3)
@@ -141,14 +123,7 @@ class MainActivity : ComponentActivity() {
                     horizontalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
                     Button(
-                        onClick = {
-                            try {
-                                injectSteps(5000L)
-                                appendLog("Injected 5000 steps")
-                            } catch (e: Exception) {
-                                appendLog("ERROR: ${e.message}\n${e.stackTraceToString()}")
-                            }
-                        },
+                        onClick = { injectSteps(5000L, onResult = { appendLog(it) }) },
                         modifier = Modifier.weight(1f),
                         colors = ButtonDefaults.buttonColors(
                             containerColor = Color(0xFFFF5722)
@@ -158,14 +133,7 @@ class MainActivity : ComponentActivity() {
                     }
 
                     Button(
-                        onClick = {
-                            try {
-                                injectSteps(10000L)
-                                appendLog("Injected 10000 steps")
-                            } catch (e: Exception) {
-                                appendLog("ERROR: ${e.message}\n${e.stackTraceToString()}")
-                            }
-                        },
+                        onClick = { injectSteps(10000L, onResult = { appendLog(it) }) },
                         modifier = Modifier.weight(1f),
                         colors = ButtonDefaults.buttonColors(
                             containerColor = Color(0xFFFF5722)
@@ -178,14 +146,7 @@ class MainActivity : ComponentActivity() {
                 Spacer(Modifier.height(8.dp))
 
                 Button(
-                    onClick = {
-                        try {
-                            openSettings()
-                            appendLog("Opened Health Connect settings")
-                        } catch (e: Exception) {
-                            appendLog("ERROR: ${e.message}\n${e.stackTraceToString()}")
-                        }
-                    },
+                    onClick = { openSettings(onResult = { appendLog(it) }) },
                     modifier = Modifier.fillMaxWidth(),
                     colors = ButtonDefaults.buttonColors(
                         containerColor = Color(0xFF9C27B0)
@@ -221,41 +182,79 @@ class MainActivity : ComponentActivity() {
         }
     }
 
-    private fun checkHealthConnectStatus(): String {
-        return when (healthConnectClient.sdkStatus) {
-            SdkStatus.SDK_AVAILABLE -> "SDK_AVAILABLE"
-            SdkStatus.SDK_UNAVAILABLE -> "SDK_UNAVAILABLE"
-            SdkStatus.SDK_INSTALLED -> "SDK_INSTALLED (update required)"
-            else -> "UNKNOWN"
+    private fun checkStatus(onResult: (String) -> Unit) {
+        try {
+            if (healthConnectClient != null) {
+                onResult("SDK_AVAILABLE (client initialized)")
+            } else {
+                val intent = Intent(HealthConnectClient.ACTION_HEALTH_CONNECT_SETTINGS)
+                val canResolve = packageManager.resolveActivity(intent, 0) != null
+                if (canResolve) {
+                    onResult("SDK_INSTALLED but client init failed — try requesting permissions")
+                } else {
+                    onResult("SDK_UNAVAILABLE — install Health Connect from Google Play")
+                }
+            }
+        } catch (e: Exception) {
+            onResult("ERROR: ${e.message}\n${e.stackTraceToString()}")
         }
     }
 
-    private fun requestPermissions() {
-        permissionContract.createIntent(this, permissions).let { intent ->
+    private fun requestPermissions(onResult: (String) -> Unit) {
+        try {
+            val contract = PermissionController.createRequestPermissionResultContract()
+            val permissions = setOf(
+                "android.permission.health.WRITE_STEPS",
+                "android.permission.health.READ_STEPS"
+            )
+            val intent = contract.createIntent(this, permissions)
             startActivity(intent)
+            onResult("Permission request intent launched")
+        } catch (e: Exception) {
+            onResult("ERROR: ${e.message}\n${e.stackTraceToString()}")
         }
     }
 
-    private fun injectSteps(count: Long) {
-        val now = Instant.now()
-        val startTime = now.minus(15, ChronoUnit.MINUTES)
-        val endTime = now
-        val zone = ZoneId.systemDefault()
+    private fun injectSteps(count: Long, onResult: (String) -> Unit) {
+        val client = healthConnectClient
+        if (client == null) {
+            onResult("ERROR: Health Connect not available. Tap 'Check Status' first.")
+            return
+        }
 
-        val record = StepsRecord(
-            count = count,
-            startTime = startTime,
-            endTime = endTime,
-            startZoneOffset = zone.rules.getOffset(startTime),
-            endZoneOffset = zone.rules.getOffset(endTime)
-        )
+        val safeCount = count.coerceIn(1L, 100_000_000L)
 
-        healthConnectClient.insertRecords(listOf(record))
+        lifecycleScope.launch {
+            try {
+                val now = Instant.now()
+                val startTime = now.minus(15, ChronoUnit.MINUTES)
+                val endTime = now
+                val zone = ZoneId.systemDefault()
+
+                val record = StepsRecord(
+                    count = safeCount,
+                    startTime = startTime,
+                    endTime = endTime,
+                    startZoneOffset = zone.rules.getOffset(startTime),
+                    endZoneOffset = zone.rules.getOffset(endTime)
+                )
+
+                client.insertRecords(listOf(record))
+                onResult("Injected $safeCount steps successfully")
+            } catch (e: Exception) {
+                onResult("ERROR: ${e.message}\n${e.stackTraceToString()}")
+            }
+        }
     }
 
-    private fun openSettings() {
-        val intent = Intent(HealthConnectClient.ACTION_HEALTH_CONNECT_SETTINGS)
-        intent.flags = Intent.FLAG_ACTIVITY_NEW_TASK
-        startActivity(intent)
+    private fun openSettings(onResult: (String) -> Unit) {
+        try {
+            val intent = Intent(HealthConnectClient.ACTION_HEALTH_CONNECT_SETTINGS)
+            intent.flags = Intent.FLAG_ACTIVITY_NEW_TASK
+            startActivity(intent)
+            onResult("Opened Health Connect settings")
+        } catch (e: Exception) {
+            onResult("ERROR: ${e.message}\n${e.stackTraceToString()}")
+        }
     }
 }
